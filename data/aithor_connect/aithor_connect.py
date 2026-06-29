@@ -36,6 +36,28 @@ task_over = False
 
 recp_id = None
 
+show_cv2_windows = os.environ.get("SMART_LLM_SHOW_CV2") == "1"
+cv2_window_error_reported = False
+
+def show_frame(window_name, image):
+    global cv2_window_error_reported
+    if not show_cv2_windows:
+        return
+    try:
+        cv2.imshow(window_name, image)
+    except cv2.error as e:
+        if not cv2_window_error_reported:
+            print("OpenCV window display disabled:", e)
+            cv2_window_error_reported = True
+
+def should_stop_for_keypress():
+    if not show_cv2_windows:
+        return False
+    try:
+        return cv2.waitKey(25) & 0xFF == ord('q')
+    except cv2.error:
+        return False
+
 for i in range (no_robot):
     multi_agent_event = c.step(action="LookDown", degrees=35, agentId=i)
     # c.step(action="LookUp", degrees=30, 'agent_id':i)
@@ -167,14 +189,14 @@ def exec_actions():
                 print (e)
                 
             for i,e in enumerate(multi_agent_event.events):
-                cv2.imshow('agent%s' % i, e.cv2img)
+                show_frame('agent%s' % i, e.cv2img)
                 f_name = os.path.dirname(__file__) + "/agent_" + str(i+1) + "/img_" + str(img_counter).zfill(5) + ".png"
                 cv2.imwrite(f_name, e.cv2img)
             top_view_rgb = cv2.cvtColor(c.last_event.events[0].third_party_camera_frames[-1], cv2.COLOR_BGR2RGB)
-            cv2.imshow('Top View', top_view_rgb)
+            show_frame('Top View', top_view_rgb)
             f_name = os.path.dirname(__file__) + "/top_view/img_" + str(img_counter).zfill(5) + ".png"
             cv2.imwrite(f_name, top_view_rgb)
-            if cv2.waitKey(25) & 0xFF == ord('q'):
+            if should_stop_for_keypress():
                 break
             
             img_counter += 1    
@@ -324,22 +346,25 @@ def PickupObject(robots, pick_obj):
 def PutObject(robot, put_obj, recp):
     robot_name = robot['name']
     agent_id = int(robot_name[-1]) - 1
-    objs = list(set([obj["objectId"] for obj in c.last_event.metadata["objects"]]))
-    objs_center = list([obj["axisAlignedBoundingBox"]["center"] for obj in c.last_event.metadata["objects"]])
-    objs_dists = list([obj["distance"] for obj in c.last_event.metadata["objects"]])
+    objs = c.last_event.metadata["objects"]
 
     metadata = c.last_event.events[agent_id].metadata
     robot_location = [metadata["agent"]["position"]["x"], metadata["agent"]["position"]["y"], metadata["agent"]["position"]["z"]]
     dist_to_recp = 9999999 # distance b/w robot and the recp obj
-    for idx, obj in enumerate(objs):
-        match = re.match(recp, obj)
+    recp_obj_id = None
+    for obj in objs:
+        obj_id = obj["objectId"]
+        match = re.match(recp, obj_id)
         if match is not None:
-            dist = objs_dists[idx]
+            dist = obj["distance"]
             if dist < dist_to_recp:
-                recp_obj_id = obj
-                dest_obj_center = objs_center[idx]
+                recp_obj_id = obj_id
+                dest_obj_center = obj["axisAlignedBoundingBox"]["center"]
                 dist_to_recp = dist
-                
+
+    if recp_obj_id is None:
+        raise ValueError(f"No receptacle matching {recp} was found for PutObject({put_obj}, {recp}).")
+	            
     
     global recp_id         
     # if recp_id is not None:

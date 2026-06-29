@@ -2,13 +2,17 @@ import os
 from pathlib import Path
 import subprocess
 import argparse
+import sys
+
+from validate_plan import classify_validation_result, format_validation_report, validate_log_plan, write_validation_report
 
 def append_trans_ctr(allocated_plan):
     brk_ctr = 0
     code_segs = allocated_plan.split("\n\n")
     fn_calls = []
     for cd in code_segs:
-        if "def" not in cd and "threading.Thread" not in cd and "join" not in cd and cd[-1] == ")":
+        cd = cd.strip()
+        if cd and "def" not in cd and "threading.Thread" not in cd and "join" not in cd and cd[-1] == ")":
             # fn_calls.append(cd)
             brk_ctr += 1
     print ("No Breaks: ", brk_ctr)
@@ -62,6 +66,13 @@ args = parser.parse_args()
 
 expt_name = args.command
 print (expt_name)
+validation_issues = validate_log_plan(os.getcwd() + "/logs/" + expt_name)
+validation_classification = classify_validation_result(os.getcwd() + "/logs/" + expt_name, validation_issues)
+print(format_validation_report(validation_issues, validation_classification))
+write_validation_report(os.getcwd() + "/logs/" + expt_name, validation_issues, validation_classification)
+if any(issue.severity == "error" for issue in validation_issues):
+    raise SystemExit(1)
+
 ai_exec_file = compile_aithor_exec_file(expt_name)
 
-subprocess.run(["python", ai_exec_file])
+subprocess.run([sys.executable, ai_exec_file], check=True)

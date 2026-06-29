@@ -5,8 +5,12 @@ for i in range(25):
     action_queue.append({'action':'Done'})
     time.sleep(0.1)
 
+while len(action_queue) > 0:
+    time.sleep(0.1)
+
 task_over = True
-time.sleep(5)
+actions_thread.join(timeout=5)
+time.sleep(1)
 
 
 exec = float(success_exec) / float(total_exec)

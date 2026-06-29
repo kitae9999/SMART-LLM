@@ -1,3 +1,27 @@
+# CODE GENERATION RULES
+# The CODE Solution should follow the robot assignment described in TASK ALLOCATION when it is directly executable.
+# If the allocation splits a dependent sequence across robots and there is no TransferObject helper, consolidate that sequence onto one capable robot.
+# Use only the helper signatures below. Never add extra arguments.
+# GoToObject(robot, object)
+# OpenObject(robot, object)
+# CloseObject(robot, object)
+# BreakObject(robot, object)
+# SliceObject(robot, object)
+# SwitchOn(robot, object)
+# SwitchOff(robot, object)
+# CleanObject(robot, object)
+# PickupObject(robot, object)
+# PutObject(robot, object, receptacleObject)
+# ThrowObject(robot, object)
+# Do not use DropHandObject, PushObject, or PullObject. They may appear in older examples or robot skill lists, but they are not implemented helper functions in the AI2-THOR execution connector.
+#
+# Object ownership rule:
+# If a robot picks up an object, only that same robot may later PutObject or ThrowObject that held object.
+# Do not add PickupObject unless the object must be moved, placed into a receptacle, or explicitly held for the task.
+# Do not make robot A pick up an object and robot B put or throw that object unless a transfer helper is explicitly available.
+# Keep tool/object dependent manipulation sequences on the same robot unless a transfer helper is explicitly available.
+# There is no TransferObject helper in this codebase.
+#
 # EXAMPLE 1 - Task Description: Wash the fork. 
 # GENERAL TASK DECOMPOSITION
 # Independent subtasks:
@@ -219,13 +243,13 @@ def pick_up_fork(robot_list):
     # 2: Pick up the Fork using robot1 and robot2 togethor.
     PickupObject(robot_list,'Fork')
 
-def throw_fork_in_trash():
+def throw_fork_in_trash(robot_list):
     # robot_list = [robot1,robot3]
     # 0: SubTask 2: Throw the Fork in the Trash
     # 1: Go to the GarbageCan using robot1 and robot3 togethor.
     GoToObject(robot_list,'GarbageCan')
     # 2: Throw the Fork in the GarbageCan using robot1 and robot3 togethor.
-    ThrowObject(robot_list,'Fork', 'GarbageCan')
+    ThrowObject(robot_list[0],'Fork')
 
 # Execute SubTask 1
 pick_up_fork([robots[0],robots[1]])

@@ -1,3 +1,10 @@
+# TASK ALLOCATION EXECUTION RULES
+# There is no TransferObject helper in this codebase.
+# Do not form a robot team only by taking the union of skills if execution would require one robot to hand a held object or tool to another robot.
+# If subtasks form a dependent sequence through the same held object or tool, assign the whole dependent sequence to one capable robot whenever such a robot exists.
+# Use multiple robots for independent subtasks or parallel work that does not require unsupported object handoff.
+# If no allocation can execute without unsupported object handoff, state that the allocation is infeasible under the current helper set.
+
 # EXAMPLE 1 - Task Description: Turn off the light and turn on the faucet. 
 # GENERAL TASK DECOMPOSITION
 # Independent subtasks:

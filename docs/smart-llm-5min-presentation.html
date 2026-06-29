@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>개별연구 - 모바일 로봇 인공지능 기술 개발 최종발표</title>
+  <style>
+    :root {
+      --bg: #080908;
+      --slide: #10120f;
+      --slide-2: #151814;
+      --text: #f4f6ef;
+      --muted: #a8b0a4;
+      --line: rgba(244, 246, 239, 0.14);
+      --line-strong: rgba(244, 246, 239, 0.24);
+      --green: #b7ff2a;
+      --cyan: #52d7f7;
+      --red: #ff5a4f;
+      --amber: #ffbf47;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 78% 6%, rgba(183, 255, 42, 0.08), transparent 28%),
+        radial-gradient(circle at 8% 88%, rgba(82, 215, 247, 0.06), transparent 24%),
+        var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+      letter-spacing: 0;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:
+        linear-gradient(rgba(244, 246, 239, 0.03) 1px, transparent 1px) 0 0 / 48px 48px,
+        linear-gradient(90deg, rgba(244, 246, 239, 0.03) 1px, transparent 1px) 0 0 / 48px 48px;
+      pointer-events: none;
+    }
+
+    .deck {
+      width: min(1280px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 36px 0;
+      display: grid;
+      gap: 36px;
+    }
+
+    .slide {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 720px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background:
+        linear-gradient(135deg, rgba(244, 246, 239, 0.06), transparent 32%),
+        linear-gradient(315deg, rgba(183, 255, 42, 0.045), transparent 36%),
+        var(--slide);
+      overflow: hidden;
+      box-shadow: 0 24px 96px rgba(0, 0, 0, 0.42);
+      break-after: page;
+    }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.28'/%3E%3C/svg%3E");
+      opacity: 0.10;
+      mix-blend-mode: screen;
+      pointer-events: none;
+    }
+
+    .slide-inner {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      height: 100%;
+    }
+
+    .rail {
+      display: grid;
+      grid-template-rows: 1fr;
+      border-right: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.16);
+      padding: 28px 12px;
+    }
+
+    .slide-no {
+      align-self: center;
+      justify-self: center;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .slide-no b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--green);
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 950;
+    }
+
+    .content {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 42px 56px;
+      min-width: 0;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .topline .point {
+      color: var(--green);
+    }
+
+    .body {
+      align-self: center;
+      min-width: 0;
+    }
+
+    .footer {
+      display: none;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 980px;
+      font-size: clamp(38px, 4.1vw, 62px);
+      line-height: 1.03;
+      font-weight: 950;
+      letter-spacing: -0.035em;
+      text-wrap: balance;
+    }
+
+    h2 {
+      max-width: 980px;
+      font-size: clamp(28px, 2.8vw, 42px);
+      line-height: 1.12;
+      font-weight: 950;
+      letter-spacing: -0.028em;
+      text-wrap: balance;
+    }
+
+    h3 {
+      font-size: 19px;
+      line-height: 1.18;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+
+    .lead {
+      max-width: 850px;
+      margin-top: 24px;
+      color: #dfe5d7;
+      font-size: 20px;
+      line-height: 1.44;
+      font-weight: 720;
+      letter-spacing: -0.015em;
+    }
+
+    .accent {
+      color: var(--green);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 30px;
+    }
+
+    .chip {
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: rgba(244, 246, 239, 0.05);
+      padding: 10px 14px;
+      color: #e7ecdf;
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.84fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .panel {
+      position: relative;
+      min-height: 170px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(244, 246, 239, 0.075), rgba(244, 246, 239, 0.025));
+      padding: 22px;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      top: 0;
+      height: 3px;
+      background: var(--panel-color, var(--green));
+    }
+
+    .panel.green { --panel-color: var(--green); }
+    .panel.cyan { --panel-color: var(--cyan); }
+    .panel.red { --panel-color: var(--red); }
+    .panel.amber { --panel-color: var(--amber); }
+
+    .panel p {
+      margin-top: 14px;
+      color: #c9d1c3;
+      font-size: 18px;
+      line-height: 1.55;
+      font-weight: 650;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 32px;
+    }
+
+    .step {
+      min-height: 225px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(244, 246, 239, 0.045);
+      padding: 22px;
+    }
+
+    .step .idx {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      margin-bottom: 22px;
+      border-radius: 50%;
+      background: var(--green);
+      color: #10120f;
+      font-weight: 950;
+    }
+
+    .step p {
+      margin-top: 13px;
+      color: #c9d1c3;
+      font-size: 17px;
+      line-height: 1.5;
+      font-weight: 640;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(244, 246, 239, 0.035);
+      font-size: 17px;
+    }
+
+    .table th,
+    .table td {
+      border-bottom: 1px solid var(--line);
+      padding: 16px 18px;
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.42;
+    }
+
+    .table th {
+      color: var(--green);
+      background: rgba(0, 0, 0, 0.24);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .table td {
+      color: #e3e9dc;
+      font-weight: 660;
+    }
+
+    .table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(0, 0, 0, 0.22);
+      padding: 16px;
+    }
+
+    .metric b {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--green);
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .bullets {
+      display: grid;
+      gap: 14px;
+      margin: 30px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .bullets li {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 14px;
+      color: #e3e9dc;
+      font-size: 20px;
+      line-height: 1.42;
+      font-weight: 770;
+      letter-spacing: -0.012em;
+    }
+
+    .bullets span {
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(183, 255, 42, 0.42);
+      border-radius: 12px;
+      background: rgba(183, 255, 42, 0.12);
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 950;
+    }
+
+    .quote {
+      max-width: 960px;
+      margin-top: 26px;
+      border-left: 4px solid var(--green);
+      padding-left: 22px;
+      color: #e7ecdf;
+      font-size: 24px;
+      line-height: 1.36;
+      font-weight: 850;
+      letter-spacing: -0.02em;
+    }
+
+    .video-slot {
+      position: relative;
+      display: grid;
+      place-items: center;
+      box-sizing: border-box;
+      width: 100%;
+      height: 380px;
+      min-height: 380px;
+      border: 1px solid var(--line-strong);
+      border-radius: 28px;
+      background:
+        linear-gradient(135deg, rgba(82, 215, 247, 0.12), transparent 32%),
+        linear-gradient(315deg, rgba(183, 255, 42, 0.08), transparent 34%),
+        rgba(244, 246, 239, 0.04);
+      padding: 32px;
+      overflow: hidden;
+    }
+
+    .video-slot::before {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border: 1px dashed rgba(244, 246, 239, 0.28);
+      border-radius: 22px;
+    }
+
+    .video-inner {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+    }
+
+    .video-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .video-label::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 0 6px rgba(255, 90, 79, 0.14);
+    }
+
+    .video-slot p {
+      color: var(--text);
+      font-size: 24px;
+      line-height: 1.24;
+      font-weight: 930;
+      letter-spacing: -0.025em;
+    }
+
+    .video-slot code {
+      display: block;
+      margin-top: 22px;
+      color: #b9c2b6;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: normal;
+    }
+
+    .code {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: #050605;
+      color: #dce5d1;
+      padding: 20px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 15px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 900px) {
+      .deck {
+        width: calc(100vw - 20px);
+        padding: 10px 0;
+      }
+
+      .slide {
+        aspect-ratio: auto;
+        min-height: auto;
+      }
+
+      .slide-inner {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .content {
+        padding: 28px 22px;
+      }
+
+      .grid-2,
+      .grid-3,
+      .pipeline,
+      .metric-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @page {
+      size: 16in 9in;
+      margin: 0;
+    }
+
+    @media print {
+      html,
+      body {
+        background: var(--bg);
+      }
+
+      .deck {
+        width: 16in;
+        padding: 0;
+        gap: 0;
+      }
+
+      .slide {
+        width: 16in;
+        height: 9in;
+        min-height: 0;
+        border-radius: 0;
+        border: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>01</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">개별연구 최종발표</span>
+            <span>AI2-THOR · Multi-Agent Planning · LLM</span>
+          </div>
+          <main class="body">
+            <h1>개별연구 - 모바일 로봇<br>인공지능 기술 개발 최종발표</h1>
+            <p class="lead">SMART-LLM 코드 직접 실행 및 FloorPlan6 반복 실험 기반 계획 생성-실행 차이 분석</p>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>02</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">문제 정의</span>
+            <span>Natural language → executable robot plan</span>
+          </div>
+          <main class="body">
+            <h2>로봇 직접 제어보다 작업 계획 생성에 초점을 둔 프로젝트</h2>
+            <div class="grid-3">
+              <div class="panel green">
+                <h3>입력</h3>
+                <p>자연어 지시 입력: “토마토를 잘라라”, “상추를 씻고 조리대에 올려라”</p>
+              </div>
+              <div class="panel cyan">
+                <h3>추론</h3>
+                <p>작업 분해, 로봇별 스킬 기반 역할 할당, 실행 순서 결정</p>
+              </div>
+              <div class="panel red">
+                <h3>검증</h3>
+                <p>AI2-THOR 기반 객체 상태 변화 확인 및 계획 허점 관찰</p>
+              </div>
+            </div>
+            <p class="quote">해석: SMART-LLM은 LLM을 <span class="accent">로봇의 계획자</span>로 사용하는 시스템</p>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>03</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">시스템 구조</span>
+            <span>run_llm.py → execute_plan.py</span>
+          </div>
+          <main class="body">
+            <h2>네 단계의 코드 실행 흐름</h2>
+            <div class="pipeline">
+              <div class="step">
+                <span class="idx">1</span>
+                <h3>작업 분해</h3>
+                <p>자연어 지시의 하위 작업 분해</p>
+              </div>
+              <div class="step">
+                <span class="idx">2</span>
+                <h3>로봇 할당 추론</h3>
+                <p>로봇 스킬과 객체 정보 기반 담당 로봇 판단</p>
+              </div>
+              <div class="step">
+                <span class="idx">3</span>
+                <h3>코드 생성</h3>
+                <p>`GoToObject`, `PickupObject` 등 Python action 호출 생성</p>
+              </div>
+              <div class="step">
+                <span class="idx">4</span>
+                <h3>시뮬레이터 실행</h3>
+                <p>AI2-THOR 실행 및 결과 영상 생성</p>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>04</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">FloorPlan6 실험</span>
+            <span>동일 환경 반복 실행 비교</span>
+          </div>
+          <main class="body">
+            <h2>FloorPlan6 기반 실험 구성과 관찰 포인트</h2>
+            <table class="table" style="margin-top: 28px;">
+              <thead>
+                <tr>
+                  <th>지침</th>
+                  <th>관찰 포인트</th>
+                  <th>실행 결과</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Slice the tomato</td>
+                  <td>짧은 순서의 단일 로봇 작업: 이동, 집기, 자르기</td>
+                  <td>두 번 모두 안정 수행 및 기준선 역할</td>
+                </tr>
+                <tr>
+                  <td>Wash the lettuce and place lettuce on the Countertop</td>
+                  <td>씻기와 배치가 이어지는 작업: 물체 상태 추적 필요</td>
+                  <td>1차 단일 로봇 처리, 2차 로봇 분담 중 전달 과정 누락</td>
+                </tr>
+                <tr>
+                  <td>Throw the Spatula in the trash</td>
+                  <td>로봇 스킬 선택과 action 함수 인자 검증</td>
+                  <td>할당 추론-코드 불일치 및 실행 오류 발생</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="quote">핵심: 성공 여부보다 LLM 계획의 물체 상태와 로봇 소유권 유지 여부</p>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>05</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">안정 사례</span>
+            <span>single robot baseline</span>
+          </div>
+          <main class="body">
+            <div class="grid-2">
+              <div>
+                <h2>두 번 모두 안정적이었던 Slice the tomato</h2>
+                <ul class="bullets">
+                  <li><span>01</span><div>Knife 집기 이후 Tomato 자르기까지 단일 로봇 수행</div></li>
+                  <li><span>02</span><div>2차 결과에서 Knife를 CounterTop에 반환하는 동작 추가</div></li>
+                  <li><span>03</span><div>`Tomato isSliced` 목표 하나로 성공 여부 해석 용이</div></li>
+                </ul>
+              </div>
+              <div class="video-slot">
+                <div class="video-inner">
+                  <div class="video-label">VIDEO SLOT A</div>
+                  <p>Slice the tomato top-view 영상 삽입 위치</p>
+                  <code>추천: logs/Slice_the_tomato_plans_05-03-2026-16-37-09/video_top_view.mp4<br>대체: logs/Slice_the_tomato_plans_04-24-2026-21-20-11/video_top_view.mp4</code>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>06</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">반복 실행 비교</span>
+            <span>same task, different code plan</span>
+          </div>
+          <main class="body">
+            <h2>같은 지침에서도 달라지는 code plan</h2>
+            <div class="grid-2" style="margin-top: 28px;">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>작업</th>
+                    <th>1차</th>
+                    <th>2차</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Slice tomato</td>
+                    <td>단일 로봇 자르기 수행</td>
+                    <td>단일 로봇 Knife 반환까지 수행</td>
+                  </tr>
+                  <tr>
+                    <td>Wash lettuce</td>
+                    <td>단일 로봇 세척 후 조리대 배치</td>
+                    <td>Robot 1 세척 / Robot 2 배치 코드 생성</td>
+                  </tr>
+                  <tr>
+                    <td>Throw spatula</td>
+                    <td>팀 필요 추론, 단일 로봇 코드 생성</td>
+                    <td>팀 형태 코드 생성, 인자 개수 오류 발생</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="video-slot">
+                <div class="video-inner">
+                  <div class="video-label">VIDEO SLOT B</div>
+                  <p>Wash the lettuce 비교 영상 삽입 위치</p>
+                  <code>추천: logs/Wash_the_lettuce_and_place_lettuce_on_the_Countertop_plans_04-24-2026-21-20-11/video_top_view.mp4<br>비교: logs/Wash_the_lettuce_and_place_lettuce_on_the_Countertop_plans_05-03-2026-16-37-09/video_top_view.mp4</code>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>07</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">오류 분석</span>
+            <span>reasoning-code gap</span>
+          </div>
+          <main class="body">
+            <div class="grid-2">
+              <div>
+                <h2>Throw the Spatula에서 드러난 reasoning-code gap</h2>
+                <ul class="bullets">
+                  <li><span>01</span><div>추론 단계: Robot 1과 Robot 2 협업 필요 판단</div></li>
+                  <li><span>02</span><div>생성 코드: 집은 로봇과 던지는 로봇 불일치</div></li>
+                  <li><span>03</span><div>`ThrowObject` 3개 인자 전달로 실행 중 TypeError 발생</div></li>
+                </ul>
+                <div class="code" style="margin-top: 22px;"># 생성된 문제 코드
+GoToObject(robot_list[1], 'Spatula')
+PickupObject(robot_list[1], 'Spatula')
+GoToObject(robot_list[0], 'GarbageCan')
+ThrowObject(robot_list[0], 'Spatula', 'GarbageCan')
+
+# 실제 helper 정의
+def ThrowObject(robot, sw_obj): ...</div>
+              </div>
+              <div class="video-slot">
+                <div class="video-inner">
+                  <div class="video-label">VIDEO SLOT C</div>
+                  <p>Throw the Spatula 영상 삽입 위치</p>
+                  <code>추천: logs/Throw_the_Spatula_in_the_trash_plans_04-24-2026-21-20-11/video_top_view.mp4</code>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="slide-inner">
+        <aside class="rail">
+          <div class="slide-no"><b>08</b>/ 08</div>
+        </aside>
+        <div class="content">
+          <div class="topline">
+            <span class="point">결론</span>
+            <span>what should be added</span>
+          </div>
+          <main class="body">
+            <h2>SMART-LLM 가능성과 실행 전 검증 필요성</h2>
+            <div class="grid-3">
+              <div class="panel green">
+                <h3>확인한 점</h3>
+                <p>자연어 지시를 하위 작업과 Python action plan으로 변환 가능</p>
+              </div>
+              <div class="panel amber">
+                <h3>발견한 한계</h3>
+                <p>추론 결과와 실제 코드 불일치, 로봇 스킬과 함수 인자 형식 미강제</p>
+              </div>
+              <div class="panel cyan">
+                <h3>보완 방향</h3>
+                <p>action 인자, 로봇 스킬, 물체 소유권 검사 validator 필요</p>
+              </div>
+            </div>
+            <p class="quote">결론: 시스템 완성도를 결정하는 LLM 출력-simulator 실행 사이의 <span class="accent">검증 계층</span></p>
+          </main>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
