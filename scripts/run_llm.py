@@ -35,6 +35,10 @@ from validate_allocation import (
     format_allocation_validation_report,
     validate_allocation_plan,
 )
+from compare_allocation_code import (
+    compare_allocation_to_code,
+    write_consistency_outputs,
+)
 
 IMPLEMENTED_AI2THOR_ACTIONS = [
     "GoToObject <robot><object>",
@@ -116,6 +120,10 @@ class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 
     semantic_allocation_review: dict
     semantic_allocation_review_raw: str
     semantic_allocation_review_status: str
+    code_actions: list
+    allocation_actions: list
+    allocation_code_consistency_status: str
+    allocation_code_consistency_report: dict
     code_plan: str
     task_robots: list
     ground_truth: list
@@ -859,6 +867,28 @@ def validate_code_plan_node(state: SmartLLMState): # state는 LangGraph가 넘�
     }
 
 
+def check_allocation_code_consistency_node(state: SmartLLMState):
+    result = compare_allocation_to_code(
+        state["allocation_plan"],
+        state["code_plan"],
+        state["task_robots"],
+        state.get("validation_status", "UNKNOWN"),
+    )
+    report = result.to_dict()
+    print(f"Allocation-code consistency status: {result.status}")
+    print(result.summary)
+
+    if state.get("log_results", True) and state.get("log_path"):
+        write_consistency_outputs(state["log_path"], result)
+
+    return {
+        "code_actions": result.code_actions,
+        "allocation_actions": result.allocation_actions,
+        "allocation_code_consistency_status": result.status,
+        "allocation_code_consistency_report": report,
+    }
+
+
 def repair_code_plan_node(state: SmartLLMState):
     next_attempt = state.get("attempt", 0) + 1
     print(f"Regenerating code plan from validation feedback... attempt {next_attempt}/{state['repair_attempts']}")
@@ -941,6 +971,7 @@ def build_task_graph():
     builder.add_node("save_allocation_failure", save_allocation_failure_node)
     builder.add_node("save_allocation_validation_failure", save_allocation_validation_failure_node)
     builder.add_node("validate_code", validate_code_plan_node)
+    builder.add_node("check_allocation_code_consistency", check_allocation_code_consistency_node)
     builder.add_node("repair_code", repair_code_plan_node)
     builder.add_edge(START, "decompose")
     builder.add_edge("decompose", "allocate")
@@ -966,8 +997,9 @@ def build_task_graph():
     builder.add_edge("save_plan", "validate_code")
     builder.add_edge("save_allocation_failure", END)
     builder.add_edge("save_allocation_validation_failure", END)
+    builder.add_edge("validate_code", "check_allocation_code_consistency")
     builder.add_conditional_edges(
-        "validate_code",
+        "check_allocation_code_consistency",
         route_after_validation,
         {
             "repair": "repair_code",
