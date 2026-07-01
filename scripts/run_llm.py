@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 import random
+import re
 import subprocess
 from typing import Literal, TypedDict
 
@@ -62,6 +63,10 @@ ALLOCATION_SYSTEM_MESSAGE = (
     "In Task Allocation based on Mass alone, first check if robot teams are required, then ensure robot mass capacity or team mass capacity is sufficient. "
     "If multiple executable allocations exist, choose the best available option by reasoning to the best of your ability."
 )
+ALLOCATION_STRUCTURE_SYSTEM_MESSAGE = (
+    "You convert robot task allocation reasoning into strict JSON. "
+    "Return only valid JSON. Do not include Markdown, code fences, headings, explanations, feasibility assessments, reasons, or issues."
+)
 
 
 class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 부모 클래스인데 TypedDict는 일반적인 클래스상속으로 사용되지 않음
@@ -79,6 +84,11 @@ class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 
     task_index: int
     decomposed_plan: str
     allocated_plan: str
+    allocation_plan: dict
+    allocation_plan_raw: str
+    allocation_structure_status: str
+    allocation_structure_report: str
+    allocation_structure_attempts: int
     code_plan: str
     task_robots: list
     ground_truth: list
@@ -127,6 +137,140 @@ def extract_python_code(text):
             return "\n".join(lines[1:]).strip()
 
     return code_blocks[1].strip()
+
+
+def strip_fenced_block(block):
+    lines = block.strip().splitlines()
+    if lines and lines[0].strip().lower() in ("json", "javascript", "js"):
+        return "\n".join(lines[1:]).strip()
+    return block.strip()
+
+
+def parse_json_from_llm_output(text):
+    candidates = []
+
+    if "```" in text:
+        code_blocks = text.split("```")
+        candidates.extend(strip_fenced_block(block) for block in code_blocks[1::2])
+
+    candidates.append(text.strip())
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and start < end:
+        candidates.append(text[start:end + 1].strip())
+
+    errors = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate), candidate
+        except json.JSONDecodeError as exc:
+            errors.append(str(exc))
+
+    detail = errors[-1] if errors else "no JSON object found"
+    raise ValueError(f"Could not parse allocation JSON: {detail}")
+
+
+def find_disallowed_allocation_keys(value, path="$"):
+    disallowed = {"feasibility", "reason", "issues"}
+    found = []
+
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if key in disallowed:
+                found.append(child_path)
+            found.extend(find_disallowed_allocation_keys(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(find_disallowed_allocation_keys(child, f"{path}[{index}]"))
+
+    return found
+
+
+def validate_allocation_plan_shape(allocation_plan, task_robots):
+    issues = []
+    robot_names = {robot["name"] for robot in task_robots}
+
+    if not isinstance(allocation_plan, dict):
+        return ["allocation_plan must be a JSON object."]
+
+    top_level_keys = set(allocation_plan)
+    if top_level_keys != {"assignments"}:
+        issues.append("allocation_plan must contain exactly one top-level key: assignments.")
+
+    disallowed_paths = find_disallowed_allocation_keys(allocation_plan)
+    if disallowed_paths:
+        issues.append(
+            "allocation_plan must not include validator fields: "
+            + ", ".join(disallowed_paths)
+        )
+
+    assignments = allocation_plan.get("assignments")
+    if not isinstance(assignments, list):
+        issues.append("allocation_plan.assignments must be a list.")
+        return issues
+
+    if not assignments:
+        issues.append("allocation_plan.assignments must contain at least one assignment.")
+
+    for assignment_index, assignment in enumerate(assignments):
+        assignment_path = f"assignments[{assignment_index}]"
+        if not isinstance(assignment, dict):
+            issues.append(f"{assignment_path} must be an object.")
+            continue
+
+        step_id = assignment.get("step_id")
+        if not isinstance(step_id, str) or not step_id.strip():
+            issues.append(f"{assignment_path}.step_id must be a non-empty string.")
+        elif re.fullmatch(r"subtask_\d+", step_id) is None:
+            issues.append(f"{assignment_path}.step_id must use the format subtask_1, subtask_2, ...")
+
+        description = assignment.get("description")
+        if not isinstance(description, str) or not description.strip():
+            issues.append(f"{assignment_path}.description must be a non-empty string.")
+
+        robot = assignment.get("robot")
+        if robot not in robot_names:
+            issues.append(f"{assignment_path}.robot must be one of {sorted(robot_names)}.")
+
+        depends_on = assignment.get("depends_on")
+        if not isinstance(depends_on, list):
+            issues.append(f"{assignment_path}.depends_on must be a list.")
+
+        actions = assignment.get("actions")
+        if not isinstance(actions, list):
+            issues.append(f"{assignment_path}.actions must be a list.")
+            continue
+
+        for action_index, action in enumerate(actions):
+            action_path = f"{assignment_path}.actions[{action_index}]"
+            if not isinstance(action, dict):
+                issues.append(f"{action_path} must be an object.")
+                continue
+
+            helper = action.get("helper")
+            if helper not in IMPLEMENTED_ACTION_NAMES:
+                issues.append(f"{action_path}.helper must be one of {sorted(IMPLEMENTED_ACTION_NAMES)}.")
+
+            action_robot = action.get("robot")
+            if action_robot not in robot_names:
+                issues.append(f"{action_path}.robot must be one of {sorted(robot_names)}.")
+
+            obj = action.get("object")
+            if not isinstance(obj, str) or not obj.strip():
+                issues.append(f"{action_path}.object must be a non-empty string.")
+
+            receptacle = action.get("receptacle")
+            if helper == "PutObject":
+                if not isinstance(receptacle, str) or not receptacle.strip():
+                    issues.append(f"{action_path}.receptacle must be a non-empty string for PutObject.")
+            elif receptacle is not None:
+                issues.append(f"{action_path}.receptacle must be null unless helper is PutObject.")
+
+    return issues
 
 def build_repair_prompt(task, decomposed_plan, allocated_plan, current_code_plan, validation_report, task_robots, ground_truth):
     prompt = "from skills import " + IMPLEMENTED_AI2THOR_ACTIONS_TEXT
@@ -190,10 +334,75 @@ def build_code_prompt(objects_ai, code_prompt):
     return prompt
 
 
+def build_allocation_structure_prompt(state, previous_error=None):
+    prompt = "# Task Description\n"
+    prompt += state["task"]
+    prompt += "\n\n# GENERAL TASK DECOMPOSITION\n"
+    prompt += state["decomposed_plan"]
+    prompt += "\n\n# NATURAL LANGUAGE TASK ALLOCATION\n"
+    prompt += state["allocated_plan"]
+    prompt += "\n\n# Available Robots\n"
+    prompt += f"robots = {state['task_robots']}"
+    prompt += "\n\n# Available Objects\n"
+    prompt += state["objects_ai"]
+    prompt += "\n\n# JSON OUTPUT REQUIREMENTS\n"
+    prompt += "\nReturn only one valid JSON object. Do not include Markdown or code fences."
+    prompt += "\nThe JSON must contain exactly one top-level key: assignments."
+    prompt += "\nDo not include feasibility, reason, issues, semantic_status, confidence, or concerns."
+    prompt += "\nUse runtime robot names exactly as provided, such as robot1 or robot2."
+    prompt += "\nUse helper names only from this set: " + ", ".join(sorted(IMPLEMENTED_ACTION_NAMES)) + "."
+    prompt += "\nUse step_id values in this format: subtask_1, subtask_2, ..."
+    prompt += "\nFor PutObject actions, receptacle must be the target receptacle object string."
+    prompt += "\nFor every non-PutObject action, receptacle must be null."
+    prompt += "\nUse depends_on as a list of step_id strings."
+    prompt += "\n\n# Required JSON shape\n"
+    prompt += json.dumps(
+        {
+            "assignments": [
+                {
+                    "step_id": "subtask_1",
+                    "description": "short subtask description",
+                    "robot": "robot1",
+                    "actions": [
+                        {
+                            "helper": "PickupObject",
+                            "robot": "robot1",
+                            "object": "Mug",
+                            "receptacle": None,
+                        }
+                    ],
+                    "depends_on": [],
+                }
+            ]
+        },
+        indent=2,
+    )
+
+    if previous_error:
+        prompt += "\n\n# Previous invalid output problem\n"
+        prompt += previous_error
+        prompt += "\nReturn corrected JSON only."
+
+    return prompt
+
+
 def make_task_folder_name(task, date_time):
     task_name = "{fxn}".format(fxn='_'.join(task.split(' ')))
     task_name = task_name.replace('\n','')
     return f"{task_name}_plans_{date_time}"
+
+
+def write_task_log_header(log_path, state):
+    with open(f"{log_path}/log.txt", 'w') as f:
+        f.write(state["task"])
+        f.write(f"\n\nGPT Version: {state['gpt_version']}")
+        f.write(f"\n\nFloor Plan: {state['floor_plan']}")
+        f.write(f"\n{state['objects_ai']}")
+        f.write(f"\nrobots = {state['task_robots']}")
+        f.write(f"\nground_truth = {state['ground_truth']}")
+        f.write(f"\ntrans = {state['trans']}")
+        f.write(f"\nmax_trans = {state['max_trans']}")
+        f.write(f"\nPrompt Policy: {state.get('prompt_policy', 'execution-aware')}")
 
 
 def code_generation_constraints(prompt_policy):
@@ -272,6 +481,65 @@ def allocate_task_node(state: SmartLLMState):
     return {"allocated_plan": text}
 
 
+def structure_allocation_node(state: SmartLLMState):
+    print(f"Structuring Allocation Plan for task {state['task_index'] + 1}: {state['task']}")
+    attempts = max(1, state.get("allocation_structure_attempts", 2))
+    previous_error = None
+    last_raw = ""
+    last_report = ""
+
+    for attempt in range(1, attempts + 1):
+        prompt = build_allocation_structure_prompt(state, previous_error)
+
+        if "gpt" not in state["gpt_version"]:
+            _, text = LM(
+                prompt,
+                state["gpt_version"],
+                max_tokens=1000,
+                stop=None,
+                frequency_penalty=0.0,
+            )
+        else:
+            messages = [
+                {"role": "system", "content": ALLOCATION_STRUCTURE_SYSTEM_MESSAGE},
+                {"role": "user", "content": prompt},
+            ]
+            _, text = LM(
+                messages,
+                state["gpt_version"],
+                max_tokens=1200,
+                frequency_penalty=0.0,
+            )
+
+        last_raw = text
+
+        try:
+            allocation_plan, parsed_json = parse_json_from_llm_output(text)
+            issues = validate_allocation_plan_shape(allocation_plan, state["task_robots"])
+            if issues:
+                raise ValueError("\n".join(f"- {issue}" for issue in issues))
+
+            report = f"STRUCTURE_ALLOCATION_PASS after {attempt} attempt(s)."
+            return {
+                "allocation_plan": allocation_plan,
+                "allocation_plan_raw": parsed_json,
+                "allocation_structure_status": "STRUCTURE_ALLOCATION_PASS",
+                "allocation_structure_report": report,
+            }
+        except ValueError as exc:
+            last_report = f"STRUCTURE_ALLOCATION_ERROR on attempt {attempt}/{attempts}:\n{exc}"
+            previous_error = last_report
+
+    print(last_report)
+    return {
+        "allocation_plan_raw": last_raw,
+        "allocation_structure_status": "STRUCTURE_ALLOCATION_ERROR",
+        "allocation_structure_report": last_report,
+        "validation_status": "STRUCTURE_ALLOCATION_ERROR",
+        "validation_report": last_report,
+    }
+
+
 def generate_code_plan_node(state: SmartLLMState):
     print(f"Generating Allocated Code for task {state['task_index'] + 1}: {state['task']}")
     prompt = build_code_prompt(state["objects_ai"], state["code_prompt"])
@@ -310,16 +578,7 @@ def save_plan_node(state: SmartLLMState):
     log_path = f"./logs/{folder_name}"
     os.mkdir(log_path)
 
-    with open(f"{log_path}/log.txt", 'w') as f:
-        f.write(state["task"])
-        f.write(f"\n\nGPT Version: {state['gpt_version']}")
-        f.write(f"\n\nFloor Plan: {state['floor_plan']}")
-        f.write(f"\n{state['objects_ai']}")
-        f.write(f"\nrobots = {state['task_robots']}")
-        f.write(f"\nground_truth = {state['ground_truth']}")
-        f.write(f"\ntrans = {state['trans']}")
-        f.write(f"\nmax_trans = {state['max_trans']}")
-        f.write(f"\nPrompt Policy: {state.get('prompt_policy', 'execution-aware')}")
+    write_task_log_header(log_path, state)
 
     with open(f"{log_path}/decomposed_plan.py", 'w') as d:
         d.write(state["decomposed_plan"])
@@ -327,12 +586,49 @@ def save_plan_node(state: SmartLLMState):
     with open(f"{log_path}/allocated_plan.py", 'w') as a:
         a.write(state["allocated_plan"])
 
+    with open(f"{log_path}/allocation_plan.json", 'w') as allocation_file:
+        json.dump(state["allocation_plan"], allocation_file, indent=2)
+        allocation_file.write("\n")
+
     with open(f"{log_path}/code_plan.py", 'w') as x:
         x.write(state["code_plan"])
 
     return {
         "folder_name": folder_name,
         "log_path": log_path,
+    }
+
+
+def save_allocation_failure_node(state: SmartLLMState):
+    if not state.get("log_results", True):
+        return {
+            "validation_status": "STRUCTURE_ALLOCATION_ERROR",
+            "validation_report": state.get("allocation_structure_report", "Allocation structure failed."),
+        }
+
+    folder_name = make_task_folder_name(state["task"], state["date_time"])
+    log_path = f"./logs/{folder_name}"
+    os.mkdir(log_path)
+
+    write_task_log_header(log_path, state)
+
+    with open(f"{log_path}/decomposed_plan.py", 'w') as d:
+        d.write(state["decomposed_plan"])
+
+    with open(f"{log_path}/allocated_plan.py", 'w') as a:
+        a.write(state["allocated_plan"])
+
+    with open(f"{log_path}/allocation_structure_report.txt", 'w') as report:
+        report.write(state.get("allocation_structure_report", "Allocation structure failed."))
+
+    with open(f"{log_path}/allocation_plan_raw.txt", 'w') as raw:
+        raw.write(state.get("allocation_plan_raw", ""))
+
+    return {
+        "folder_name": folder_name,
+        "log_path": log_path,
+        "validation_status": "STRUCTURE_ALLOCATION_ERROR",
+        "validation_report": state.get("allocation_structure_report", "Allocation structure failed."),
     }
 
 
@@ -403,6 +699,12 @@ def route_after_validation(state: SmartLLMState) -> Literal["repair", "finish"]:
     return "repair"
 
 
+def route_after_allocation_structure(state: SmartLLMState) -> Literal["generate", "fail"]:
+    if state["allocation_structure_status"] == "STRUCTURE_ALLOCATION_PASS":
+        return "generate"
+    return "fail"
+
+
 def build_task_graph():
     if StateGraph is None:
         raise RuntimeError(
@@ -412,15 +714,26 @@ def build_task_graph():
     builder = StateGraph(SmartLLMState) # 상태기반으로 전이할 수 있는 그래프 생성
     builder.add_node("decompose", decompose_task_node)
     builder.add_node("allocate", allocate_task_node)
+    builder.add_node("structure_allocation", structure_allocation_node)
     builder.add_node("generate_code", generate_code_plan_node)
     builder.add_node("save_plan", save_plan_node)
+    builder.add_node("save_allocation_failure", save_allocation_failure_node)
     builder.add_node("validate_code", validate_code_plan_node)
     builder.add_node("repair_code", repair_code_plan_node)
     builder.add_edge(START, "decompose")
     builder.add_edge("decompose", "allocate")
-    builder.add_edge("allocate", "generate_code")
+    builder.add_edge("allocate", "structure_allocation")
+    builder.add_conditional_edges(
+        "structure_allocation",
+        route_after_allocation_structure,
+        {
+            "generate": "generate_code",
+            "fail": "save_allocation_failure",
+        },
+    )
     builder.add_edge("generate_code", "save_plan")
     builder.add_edge("save_plan", "validate_code")
+    builder.add_edge("save_allocation_failure", END)
     builder.add_conditional_edges(
         "validate_code",
         route_after_validation,
@@ -534,6 +847,7 @@ if __name__ == "__main__": # 파일 직접 실행시에만 코드 돌리기, imp
                         choices=["execution-aware", "strict-allocation"])
     parser.add_argument("--log-results", type=bool, default=True)
     parser.add_argument("--repair-attempts", type=int, default=3)
+    parser.add_argument("--allocation-structure-attempts", type=int, default=2)
     
     args = parser.parse_args() # 커맨드라인 옵션으로 등록한 매개변수 args에 저장
 
@@ -613,6 +927,7 @@ if __name__ == "__main__": # 파일 직접 실행시에만 코드 돌리기, imp
                 "max_trans": max_trans_cnt_tasks[idx],
                 "gpt_version": args.gpt_version,
                 "repair_attempts": args.repair_attempts,
+                "allocation_structure_attempts": args.allocation_structure_attempts,
                 "attempt": 0,
             },
             config={"recursion_limit": max(25, args.repair_attempts * 3 + 10)},
