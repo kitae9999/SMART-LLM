@@ -40,6 +40,8 @@ from compare_allocation_code import (
     write_consistency_outputs,
 )
 
+OPENAI_CLIENT = None
+
 IMPLEMENTED_AI2THOR_ACTIONS = [
     "GoToObject <robot><object>",
     "OpenObject <robot><object>",
@@ -137,29 +139,40 @@ class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 
 
 
 def LM(prompt, gpt_version, max_tokens=128, temperature=0, stop=None, logprobs=1, frequency_penalty=0):
-    
+    client = get_openai_client()
+
     if "gpt" not in gpt_version:
-        response = openai.Completion.create(model=gpt_version, 
-                                            prompt=prompt, 
-                                            max_tokens=max_tokens, 
-                                            temperature=temperature, 
-                                            stop=stop, 
-                                            logprobs=logprobs, 
-                                            frequency_penalty = frequency_penalty)
-        
-        return response, response["choices"][0]["text"].strip()
-    
-    else:
-        response = openai.ChatCompletion.create(model=gpt_version, 
-                                            messages=prompt, 
-                                            max_tokens=max_tokens, 
-                                            temperature=temperature, 
-                                            frequency_penalty = frequency_penalty)
-        
-        return response, response["choices"][0]["message"]["content"].strip()
+        response = client.completions.create(
+            model=gpt_version,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop,
+            logprobs=logprobs,
+            frequency_penalty=frequency_penalty,
+        )
+
+        return response, response.choices[0].text.strip()
+
+    response = client.chat.completions.create(
+        model=gpt_version,
+        messages=prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        frequency_penalty=frequency_penalty,
+    )
+
+    return response, response.choices[0].message.content.strip()
 
 def set_api_key(openai_api_key):
-    openai.api_key = Path(openai_api_key + '.txt').read_text()
+    global OPENAI_CLIENT
+    OPENAI_CLIENT = openai.OpenAI(api_key=Path(openai_api_key + '.txt').read_text().strip())
+
+
+def get_openai_client():
+    if OPENAI_CLIENT is None:
+        raise RuntimeError("OpenAI client is not initialized. Call set_api_key() before LM().")
+    return OPENAI_CLIENT
 
 def extract_python_code(text):
     if "```" not in text:
