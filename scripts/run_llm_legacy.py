@@ -8,17 +8,9 @@ from pathlib import Path
 from datetime import datetime
 import random
 import subprocess
-from typing import Literal, TypedDict
 
 import openai
 import ai2thor.controller
-
-try:
-    from langgraph.graph import END, START, StateGraph
-except ImportError:
-    END = None
-    START = None
-    StateGraph = None
 
 import sys
 sys.path.append(".")
@@ -62,21 +54,6 @@ ALLOCATION_SYSTEM_MESSAGE = (
     "In Task Allocation based on Mass alone, first check if robot teams are required, then ensure robot mass capacity or team mass capacity is sufficient. "
     "If multiple executable allocations exist, choose the best available option by reasoning to the best of your ability."
 )
-
-
-class RepairState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 부모 클래스인데 TypedDict는 일반적인 클래스상속으로 사용되지 않음
-    log_path: str
-    task: str
-    decomposed_plan: str
-    allocated_plan: str
-    code_plan: str
-    task_robots: list
-    ground_truth: list
-    gpt_version: str
-    repair_attempts: int
-    attempt: int
-    validation_status: str
-    validation_report: str
 
 
 def LM(prompt, gpt_version, max_tokens=128, temperature=0, stop=None, logprobs=1, frequency_penalty=0):
@@ -152,110 +129,42 @@ def build_repair_prompt(task, decomposed_plan, allocated_plan, current_code_plan
     prompt += "\n\n# CORRECTED CODE PLAN\n"
     return prompt
 
-def validate_code_plan_node(state: RepairState): # state는 LangGraph가 넘겨주는 현재 상태 dict
-    Path(state["log_path"], "code_plan.py").write_text(state["code_plan"])
-    issues = validate_log_plan(state["log_path"])
-    classification = classify_validation_result(state["log_path"], issues)
-    write_validation_report(state["log_path"], issues, classification)
-    validation_report = format_validation_report(issues, classification)
-    print(validation_report)
-
-    return {
-        "validation_status": classification.status,
-        "validation_report": validation_report,
-    }
-
-
-def repair_code_plan_node(state: RepairState):
-    next_attempt = state.get("attempt", 0) + 1
-    print(f"Regenerating code plan from validation feedback... attempt {next_attempt}/{state['repair_attempts']}")
-    repair_prompt = build_repair_prompt(
-        state["task"],
-        state["decomposed_plan"],
-        state["allocated_plan"],
-        state["code_plan"],
-        state["validation_report"],
-        state["task_robots"],
-        state["ground_truth"],
-    )
-
-    if "gpt" not in state["gpt_version"]:
-        _, repaired_text = LM(
-            repair_prompt,
-            state["gpt_version"],
-            max_tokens=1000,
-            stop=["def"],
-            frequency_penalty=0.30,
-        )
-    else:
-        messages = [
-            {"role": "system", "content": CODE_GENERATION_SYSTEM_MESSAGE},
-            {"role": "user", "content": repair_prompt},
-        ]
-        _, repaired_text = LM(
-            messages,
-            state["gpt_version"],
-            max_tokens=1400,
-            frequency_penalty=0.2,
-        )
-
-    return {
-        "code_plan": extract_python_code(repaired_text),
-        "attempt": next_attempt,
-    }
-
-
-def route_after_validation(state: RepairState) -> Literal["repair", "finish"]:
-    """validation의 결과는 finish or repair """
-    if state["validation_status"] != "REPAIRABLE_PLAN_ERROR":
-        return "finish"
-
-    if state.get("attempt", 0) >= state["repair_attempts"]:
-        return "finish"
-
-    return "repair"
-
-
-def build_repair_graph():
-    if StateGraph is None:
-        raise RuntimeError(
-            "LangGraph is required for run_llm.py. Install dependencies with `pip install -r requirments.txt`."
-        )
-
-    builder = StateGraph(RepairState) # 상태기반으로 전이할 수 있는 그래프 생성
-    builder.add_node("validate", validate_code_plan_node)
-    builder.add_node("repair", repair_code_plan_node)
-    builder.add_edge(START, "validate")
-    builder.add_conditional_edges(
-        "validate",
-        route_after_validation,
-        {
-            "repair": "repair",
-            "finish": END,
-        },
-    )
-    builder.add_edge("repair", "validate")
-    return builder.compile()
-
-
 def repair_code_plan_if_needed(log_path, task, decomposed_plan, allocated_plan, code_plan, task_robots, ground_truth, gpt_version, repair_attempts):
-    repair_graph = build_repair_graph()
-    result = repair_graph.invoke(
-        {
-            "log_path": log_path,
-            "task": task,
-            "decomposed_plan": decomposed_plan,
-            "allocated_plan": allocated_plan,
-            "code_plan": code_plan,
-            "task_robots": task_robots,
-            "ground_truth": ground_truth,
-            "gpt_version": gpt_version,
-            "repair_attempts": repair_attempts,
-            "attempt": 0,
-        },
-        config={"recursion_limit": max(25, repair_attempts * 3 + 10)},
-    )
-    return result["code_plan"], result.get("validation_status", "UNKNOWN")
+    current_code_plan = code_plan
+    for attempt in range(repair_attempts + 1):
+        issues = validate_log_plan(log_path)
+        classification = classify_validation_result(log_path, issues)
+        write_validation_report(log_path, issues, classification)
+        print(format_validation_report(issues, classification))
+
+        if classification.status != "REPAIRABLE_PLAN_ERROR" or attempt == repair_attempts:
+            return current_code_plan, classification.status
+
+        print(f"Regenerating code plan from validation feedback... attempt {attempt + 1}/{repair_attempts}")
+        validation_report = format_validation_report(issues, classification)
+        repair_prompt = build_repair_prompt(
+            task,
+            decomposed_plan,
+            allocated_plan,
+            current_code_plan,
+            validation_report,
+            task_robots,
+            ground_truth,
+        )
+
+        if "gpt" not in gpt_version:
+            _, repaired_text = LM(repair_prompt, gpt_version, max_tokens=1000, stop=["def"], frequency_penalty=0.30)
+        else:
+            messages = [
+                {"role": "system", "content": CODE_GENERATION_SYSTEM_MESSAGE},
+                {"role": "user", "content": repair_prompt},
+            ]
+            _, repaired_text = LM(messages, gpt_version, max_tokens=1400, frequency_penalty=0.2)
+
+        current_code_plan = extract_python_code(repaired_text)
+        Path(log_path, "code_plan.py").write_text(current_code_plan)
+
+    return current_code_plan, "UNKNOWN"
 
 # Function returns object list with name and properties.
 def convert_to_dict_objprop(objs, obj_mass):

@@ -1,9 +1,6 @@
 # Local secrets
 api_key.txt
 
-# macOS metadata
-.DS_Store
-
 # Python/cache artifacts
 __pycache__/
 *.py[cod]
@@ -15,5 +12,5 @@ __pycache__/
 # SMART-LLM generated simulation logs and media
 logs/
 
-# Local report conversion scratch files
-docs/report_work/
+# Local Git recovery backups
+.git.broken-*/

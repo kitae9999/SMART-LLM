@@ -386,6 +386,7 @@ def validate_log_plan(log_path):
 
 
 def classify_validation_result(log_path, issues):
+    """Validation 결과를 repairable, 실패, 통과로 분류 """
     errors = [issue for issue in issues if issue.severity == "error"]
     if not errors:
         return ValidationClassification(
