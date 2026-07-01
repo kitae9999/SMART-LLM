@@ -31,6 +31,10 @@ from validate_plan import (
     validate_log_plan,
     write_validation_report,
 )
+from validate_allocation import (
+    format_allocation_validation_report,
+    validate_allocation_plan,
+)
 
 IMPLEMENTED_AI2THOR_ACTIONS = [
     "GoToObject <robot><object>",
@@ -67,6 +71,22 @@ ALLOCATION_STRUCTURE_SYSTEM_MESSAGE = (
     "You convert robot task allocation reasoning into strict JSON. "
     "Return only valid JSON. Do not include Markdown, code fences, headings, explanations, feasibility assessments, reasons, or issues."
 )
+ALLOCATION_SEMANTIC_REVIEW_SYSTEM_MESSAGE = (
+    "You review structured robot task allocations for semantic risks. "
+    "Return only valid JSON using the requested schema. Do not include Markdown, headings, or prose. "
+    "Your review is observational metadata, not a final routing decision."
+)
+ALLOWED_SEMANTIC_STATUSES = {"PASS", "SUSPICIOUS", "FAIL", "UNKNOWN"}
+ALLOWED_SEMANTIC_CONFIDENCE = {"LOW", "MEDIUM", "HIGH"}
+ALLOWED_CONCERN_CODES = {
+    "UNSUPPORTED_HANDOFF_RISK",
+    "TASK_INTENT_MISMATCH",
+    "MISSING_SUBTASK",
+    "DEPENDENT_OBJECT_SEQUENCE_SPLIT",
+    "PARALLELISM_CONFLICT",
+    "UNCLEAR_ROBOT_ASSIGNMENT",
+    "OBJECT_GOAL_AMBIGUOUS",
+}
 
 
 class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 부모 클래스인데 TypedDict는 일반적인 클래스상속으로 사용되지 않음
@@ -89,6 +109,13 @@ class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 
     allocation_structure_status: str
     allocation_structure_report: str
     allocation_structure_attempts: int
+    allocation_validation_status: str
+    allocation_validation_feasibility: str
+    allocation_validation_result: dict
+    allocation_validation_report: str
+    semantic_allocation_review: dict
+    semantic_allocation_review_raw: str
+    semantic_allocation_review_status: str
     code_plan: str
     task_robots: list
     ground_truth: list
@@ -386,6 +413,81 @@ def build_allocation_structure_prompt(state, previous_error=None):
     return prompt
 
 
+def build_allocation_semantic_review_prompt(state):
+    prompt = "# Task Description\n"
+    prompt += state["task"]
+    prompt += "\n\n# Ground Truth Goal\n"
+    prompt += str(state["ground_truth"])
+    prompt += "\n\n# GENERAL TASK DECOMPOSITION\n"
+    prompt += state["decomposed_plan"]
+    prompt += "\n\n# NATURAL LANGUAGE TASK ALLOCATION\n"
+    prompt += state["allocated_plan"]
+    prompt += "\n\n# STRUCTURED ALLOCATION JSON\n"
+    prompt += json.dumps(state["allocation_plan"], indent=2)
+    prompt += "\n\n# DETERMINISTIC ALLOCATION VALIDATION\n"
+    prompt += state.get("allocation_validation_report", "Allocation validation has not run.")
+    prompt += "\n\n# Available Robots\n"
+    prompt += f"robots = {state['task_robots']}"
+    prompt += "\n\n# Review Requirements"
+    prompt += "\nReturn only one valid JSON object with exactly these keys:"
+    prompt += "\nsemantic_status, concern_codes, confidence, concerns."
+    prompt += "\nsemantic_status must be one of: PASS, SUSPICIOUS, FAIL, UNKNOWN."
+    prompt += "\nconfidence must be one of: LOW, MEDIUM, HIGH."
+    prompt += "\nconcern_codes must use only: " + ", ".join(sorted(ALLOWED_CONCERN_CODES)) + "."
+    prompt += "\nconcerns must be a list of short human-readable strings."
+    prompt += "\nDo not include routing decisions or code generation instructions."
+    prompt += "\n\n# Required JSON shape\n"
+    prompt += json.dumps(
+        {
+            "semantic_status": "PASS",
+            "concern_codes": [],
+            "confidence": "LOW",
+            "concerns": [],
+        },
+        indent=2,
+    )
+    return prompt
+
+
+def normalize_semantic_review(review):
+    if not isinstance(review, dict):
+        raise ValueError("semantic review must be a JSON object.")
+
+    semantic_status = review.get("semantic_status")
+    confidence = review.get("confidence")
+    concern_codes = review.get("concern_codes")
+    concerns = review.get("concerns")
+
+    if semantic_status not in ALLOWED_SEMANTIC_STATUSES:
+        raise ValueError("semantic_status must be one of " + ", ".join(sorted(ALLOWED_SEMANTIC_STATUSES)) + ".")
+    if confidence not in ALLOWED_SEMANTIC_CONFIDENCE:
+        raise ValueError("confidence must be one of " + ", ".join(sorted(ALLOWED_SEMANTIC_CONFIDENCE)) + ".")
+    if not isinstance(concern_codes, list):
+        raise ValueError("concern_codes must be a list.")
+    invalid_codes = [code for code in concern_codes if code not in ALLOWED_CONCERN_CODES]
+    if invalid_codes:
+        raise ValueError("concern_codes contains unsupported values: " + ", ".join(map(str, invalid_codes)) + ".")
+    if not isinstance(concerns, list) or not all(isinstance(concern, str) for concern in concerns):
+        raise ValueError("concerns must be a list of strings.")
+
+    return {
+        "semantic_status": semantic_status,
+        "concern_codes": concern_codes,
+        "confidence": confidence,
+        "concerns": concerns,
+    }
+
+
+def unknown_semantic_review(reason, raw=""):
+    return {
+        "semantic_status": "UNKNOWN",
+        "concern_codes": [],
+        "confidence": "LOW",
+        "concerns": [reason],
+        "raw": raw,
+    }
+
+
 def make_task_folder_name(task, date_time):
     task_name = "{fxn}".format(fxn='_'.join(task.split(' ')))
     task_name = task_name.replace('\n','')
@@ -403,6 +505,26 @@ def write_task_log_header(log_path, state):
         f.write(f"\ntrans = {state['trans']}")
         f.write(f"\nmax_trans = {state['max_trans']}")
         f.write(f"\nPrompt Policy: {state.get('prompt_policy', 'execution-aware')}")
+
+
+def write_stage4_outputs(log_path, state):
+    validation_result = state.get("allocation_validation_result")
+    if validation_result is not None:
+        with open(f"{log_path}/allocation_validation_result.json", 'w') as validation_file:
+            json.dump(validation_result, validation_file, indent=2)
+            validation_file.write("\n")
+
+    validation_report = state.get("allocation_validation_report")
+    if validation_report is not None:
+        with open(f"{log_path}/allocation_validation_report.txt", 'w') as validation_report_file:
+            validation_report_file.write(validation_report)
+            validation_report_file.write("\n")
+
+    semantic_review = state.get("semantic_allocation_review")
+    if semantic_review is not None:
+        with open(f"{log_path}/semantic_allocation_review.json", 'w') as semantic_file:
+            json.dump(semantic_review, semantic_file, indent=2)
+            semantic_file.write("\n")
 
 
 def code_generation_constraints(prompt_policy):
@@ -540,6 +662,59 @@ def structure_allocation_node(state: SmartLLMState):
     }
 
 
+def validate_allocation_node(state: SmartLLMState):
+    print(f"Validating Allocation Plan for task {state['task_index'] + 1}: {state['task']}")
+    result = validate_allocation_plan(state["allocation_plan"], state["task_robots"])
+    report = format_allocation_validation_report(result)
+    print(report)
+
+    return {
+        "allocation_validation_status": result.status,
+        "allocation_validation_feasibility": result.feasibility,
+        "allocation_validation_result": result.to_dict(),
+        "allocation_validation_report": report,
+    }
+
+
+def review_allocation_semantics_node(state: SmartLLMState):
+    print(f"Reviewing Allocation Semantics for task {state['task_index'] + 1}: {state['task']}")
+    prompt = build_allocation_semantic_review_prompt(state)
+
+    if "gpt" not in state["gpt_version"]:
+        _, text = LM(
+            prompt,
+            state["gpt_version"],
+            max_tokens=800,
+            stop=None,
+            frequency_penalty=0.0,
+        )
+    else:
+        messages = [
+            {"role": "system", "content": ALLOCATION_SEMANTIC_REVIEW_SYSTEM_MESSAGE},
+            {"role": "user", "content": prompt},
+        ]
+        _, text = LM(
+            messages,
+            state["gpt_version"],
+            max_tokens=900,
+            frequency_penalty=0.0,
+        )
+
+    try:
+        parsed_review, parsed_json = parse_json_from_llm_output(text)
+        review = normalize_semantic_review(parsed_review)
+        raw = parsed_json
+    except ValueError as exc:
+        review = unknown_semantic_review(f"Semantic allocation review could not be parsed: {exc}", text)
+        raw = text
+
+    return {
+        "semantic_allocation_review": review,
+        "semantic_allocation_review_raw": raw,
+        "semantic_allocation_review_status": review["semantic_status"],
+    }
+
+
 def generate_code_plan_node(state: SmartLLMState):
     print(f"Generating Allocated Code for task {state['task_index'] + 1}: {state['task']}")
     prompt = build_code_prompt(state["objects_ai"], state["code_prompt"])
@@ -590,12 +765,47 @@ def save_plan_node(state: SmartLLMState):
         json.dump(state["allocation_plan"], allocation_file, indent=2)
         allocation_file.write("\n")
 
+    write_stage4_outputs(log_path, state)
+
     with open(f"{log_path}/code_plan.py", 'w') as x:
         x.write(state["code_plan"])
 
     return {
         "folder_name": folder_name,
         "log_path": log_path,
+    }
+
+
+def save_allocation_validation_failure_node(state: SmartLLMState):
+    if not state.get("log_results", True):
+        return {
+            "validation_status": state.get("allocation_validation_status", "ALLOCATION_VALIDATION_ERROR"),
+            "validation_report": state.get("allocation_validation_report", "Allocation validation failed."),
+        }
+
+    folder_name = make_task_folder_name(state["task"], state["date_time"])
+    log_path = f"./logs/{folder_name}"
+    os.mkdir(log_path)
+
+    write_task_log_header(log_path, state)
+
+    with open(f"{log_path}/decomposed_plan.py", 'w') as d:
+        d.write(state["decomposed_plan"])
+
+    with open(f"{log_path}/allocated_plan.py", 'w') as a:
+        a.write(state["allocated_plan"])
+
+    with open(f"{log_path}/allocation_plan.json", 'w') as allocation_file:
+        json.dump(state["allocation_plan"], allocation_file, indent=2)
+        allocation_file.write("\n")
+
+    write_stage4_outputs(log_path, state)
+
+    return {
+        "folder_name": folder_name,
+        "log_path": log_path,
+        "validation_status": state.get("allocation_validation_status", "ALLOCATION_VALIDATION_ERROR"),
+        "validation_report": state.get("allocation_validation_report", "Allocation validation failed."),
     }
 
 
@@ -699,10 +909,19 @@ def route_after_validation(state: SmartLLMState) -> Literal["repair", "finish"]:
     return "repair"
 
 
-def route_after_allocation_structure(state: SmartLLMState) -> Literal["generate", "fail"]:
+def route_after_allocation_structure(state: SmartLLMState) -> Literal["validate", "fail"]:
     if state["allocation_structure_status"] == "STRUCTURE_ALLOCATION_PASS":
-        return "generate"
+        return "validate"
     return "fail"
+
+
+def route_after_allocation_semantic_review(state: SmartLLMState) -> Literal["generate", "fail"]:
+    if (
+        state.get("prompt_policy") == "strict-allocation"
+        and state.get("allocation_validation_status") != "ALLOCATION_PASS"
+    ):
+        return "fail"
+    return "generate"
 
 
 def build_task_graph():
@@ -715,9 +934,12 @@ def build_task_graph():
     builder.add_node("decompose", decompose_task_node)
     builder.add_node("allocate", allocate_task_node)
     builder.add_node("structure_allocation", structure_allocation_node)
+    builder.add_node("validate_allocation", validate_allocation_node)
+    builder.add_node("review_allocation_semantics", review_allocation_semantics_node)
     builder.add_node("generate_code", generate_code_plan_node)
     builder.add_node("save_plan", save_plan_node)
     builder.add_node("save_allocation_failure", save_allocation_failure_node)
+    builder.add_node("save_allocation_validation_failure", save_allocation_validation_failure_node)
     builder.add_node("validate_code", validate_code_plan_node)
     builder.add_node("repair_code", repair_code_plan_node)
     builder.add_edge(START, "decompose")
@@ -727,13 +949,23 @@ def build_task_graph():
         "structure_allocation",
         route_after_allocation_structure,
         {
-            "generate": "generate_code",
+            "validate": "validate_allocation",
             "fail": "save_allocation_failure",
+        },
+    )
+    builder.add_edge("validate_allocation", "review_allocation_semantics")
+    builder.add_conditional_edges(
+        "review_allocation_semantics",
+        route_after_allocation_semantic_review,
+        {
+            "generate": "generate_code",
+            "fail": "save_allocation_validation_failure",
         },
     )
     builder.add_edge("generate_code", "save_plan")
     builder.add_edge("save_plan", "validate_code")
     builder.add_edge("save_allocation_failure", END)
+    builder.add_edge("save_allocation_validation_failure", END)
     builder.add_conditional_edges(
         "validate_code",
         route_after_validation,
