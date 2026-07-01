@@ -70,6 +70,7 @@ class SmartLLMState(TypedDict, total=False): # 클래스명 옆 ()는 상속할 
     decompose_prompt: str
     allocated_prompt: str
     code_prompt: str
+    prompt_policy: str
     log_results: bool
     date_time: str
     log_path: str
@@ -195,6 +196,34 @@ def make_task_folder_name(task, date_time):
     return f"{task_name}_plans_{date_time}"
 
 
+def code_generation_constraints(prompt_policy):
+    constraints = [
+        "# Use only these implemented helper signatures: GoToObject(robot, object), PickupObject(robot, object), PutObject(robot, object, receptacleObject), ThrowObject(robot, object), SliceObject(robot, object), CleanObject(robot, object), OpenObject(robot, object), CloseObject(robot, object), SwitchOn(robot, object), SwitchOff(robot, object), BreakObject(robot, object).",
+        "# Do not use DropHandObject, PushObject, or PullObject because they are not implemented helper functions in data/aithor_connect/aithor_connect.py.",
+        "# Never add a target receptacle argument to ThrowObject. Correct: ThrowObject(robot, object). Incorrect: ThrowObject(robot, object, receptacle).",
+        "# Preserve object ownership: if a robot picks up an object, only that same robot may later PutObject or ThrowObject that held object. There is no TransferObject helper.",
+        "# Do not add PickupObject unless the object must be moved, placed into a receptacle, or explicitly held for the task.",
+    ]
+
+    if prompt_policy == "strict-allocation":
+        return [
+            "# Follow the TASK ALLOCATION as closely as possible, even when this exposes an execution constraint problem.",
+            "# Do not silently consolidate, reassign, or bypass robot assignments from TASK ALLOCATION.",
+        ] + constraints
+
+    return [
+        "# Follow the TASK ALLOCATION when it is directly executable under the helper and object ownership constraints.",
+        "# If the allocation splits a dependent sequence across robots and there is no TransferObject helper, consolidate that sequence onto one capable robot.",
+    ] + constraints
+
+
+def code_generation_system_message(prompt_policy):
+    if prompt_policy == "strict-allocation":
+        return CODE_GENERATION_SYSTEM_MESSAGE + " Strictly preserve the robot assignment from TASK ALLOCATION."
+
+    return CODE_GENERATION_SYSTEM_MESSAGE + " Strictly preserve the robot assignment from TASK ALLOCATION unless it is impossible under the provided constraints."
+
+
 def decompose_task_node(state: SmartLLMState):
     print(f"Generating Decomposed Plan for task {state['task_index'] + 1}: {state['task']}")
     prompt = build_decompose_prompt(state["objects_ai"], state["decompose_prompt"])
@@ -251,13 +280,8 @@ def generate_code_plan_node(state: SmartLLMState):
     curr_prompt += f"\n\nrobots = {state['task_robots']}"
     curr_prompt += state["allocated_plan"]
     curr_prompt += "\n\n# CODE GENERATION CONSTRAINTS"
-    curr_prompt += "\n# Follow the TASK ALLOCATION when it is directly executable under the helper and object ownership constraints."
-    curr_prompt += "\n# If the allocation splits a dependent sequence across robots and there is no TransferObject helper, consolidate that sequence onto one capable robot."
-    curr_prompt += "\n# Use only these implemented helper signatures: GoToObject(robot, object), PickupObject(robot, object), PutObject(robot, object, receptacleObject), ThrowObject(robot, object), SliceObject(robot, object), CleanObject(robot, object), OpenObject(robot, object), CloseObject(robot, object), SwitchOn(robot, object), SwitchOff(robot, object), BreakObject(robot, object)."
-    curr_prompt += "\n# Do not use DropHandObject, PushObject, or PullObject because they are not implemented helper functions in data/aithor_connect/aithor_connect.py."
-    curr_prompt += "\n# Never add a target receptacle argument to ThrowObject. Correct: ThrowObject(robot, object). Incorrect: ThrowObject(robot, object, receptacle)."
-    curr_prompt += "\n# Preserve object ownership: if a robot picks up an object, only that same robot may later PutObject or ThrowObject that held object. There is no TransferObject helper."
-    curr_prompt += "\n# Do not add PickupObject unless the object must be moved, placed into a receptacle, or explicitly held for the task."
+    for constraint in code_generation_constraints(state.get("prompt_policy", "execution-aware")):
+        curr_prompt += "\n" + constraint
     curr_prompt += f"\n# CODE Solution  \n"
 
     if "gpt" not in state["gpt_version"]:
@@ -266,7 +290,7 @@ def generate_code_plan_node(state: SmartLLMState):
         messages = [
             {
                 "role": "system",
-                "content": CODE_GENERATION_SYSTEM_MESSAGE + " Strictly preserve the robot assignment from TASK ALLOCATION unless it is impossible under the provided constraints.",
+                "content": code_generation_system_message(state.get("prompt_policy", "execution-aware")),
             },
             {"role": "user", "content": curr_prompt},
         ]
@@ -295,6 +319,7 @@ def save_plan_node(state: SmartLLMState):
         f.write(f"\nground_truth = {state['ground_truth']}")
         f.write(f"\ntrans = {state['trans']}")
         f.write(f"\nmax_trans = {state['max_trans']}")
+        f.write(f"\nPrompt Policy: {state.get('prompt_policy', 'execution-aware')}")
 
     with open(f"{log_path}/decomposed_plan.py", 'w') as d:
         d.write(state["decomposed_plan"])
@@ -505,6 +530,8 @@ if __name__ == "__main__": # 파일 직접 실행시에만 코드 돌리기, imp
     parser.add_argument("--test-set", type=str, default="final_test", 
                         choices=['final_test'])
     
+    parser.add_argument("--prompt-policy", type=str, default="execution-aware",
+                        choices=["execution-aware", "strict-allocation"])
     parser.add_argument("--log-results", type=bool, default=True)
     parser.add_argument("--repair-attempts", type=int, default=3)
     
@@ -575,6 +602,7 @@ if __name__ == "__main__": # 파일 직접 실행시에만 코드 돌리기, imp
                 "decompose_prompt": decompose_prompt,
                 "allocated_prompt": allocated_prompt,
                 "code_prompt": code_prompt,
+                "prompt_policy": args.prompt_policy,
                 "log_results": args.log_results,
                 "date_time": date_time,
                 "task": task,
